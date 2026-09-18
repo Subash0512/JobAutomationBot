@@ -753,6 +753,11 @@ LinkedIn account activity is not automated.
 \* Automated GitHub reporting
 
 
+## Dashboard Preview
+
+![Dashboard Preview](docs/screenshots/dashboard.png)
+
+
 
 \## Disclaimer
 
