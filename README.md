@@ -1,781 +1,415 @@
-\# JobAutomationBot
 
+# JobAutomationBot 🚀
 
+An automated job discovery, application tracking, and notification system built with Python. The project collects relevant fresher job opportunities, filters them based on predefined criteria, supports recruiter-email applications, and provides a local dashboard to monitor application activity.
 
-An automated job discovery, filtering, application-tracking, and email-notification system built with Python.
+## 📌 Project Overview
 
+JobAutomationBot helps job seekers simplify their job search by automating repetitive tasks such as:
 
+- Collecting job opportunities from public job sources
+- Filtering jobs based on role, location, experience, and freshness
+- Storing job information in an SQLite database
+- Applying through recruiter email when available
+- Attaching a resume to application emails
+- Tracking application status
+- Sending email confirmations and daily summaries
+- Displaying job and application statistics through a Flask dashboard
+- Running automatically using Windows Task Scheduler
 
-\## Overview
+> **Project Status:** Actively developed. The current implementation supports public job collection, recruiter-email applications, tracking, notifications, and a local dashboard.
 
+---
 
+## ✨ Features
 
-JobAutomationBot searches for entry-level IT opportunities, filters them according to configured career preferences, tracks discovered jobs in SQLite, and can automatically send applications through permitted recruiter-email routes.
+### 1. Job Collection
 
+- Collects job listings from supported public job APIs.
+- Filters jobs according to configured criteria.
+- Identifies relevant fresher and entry-level opportunities.
+- Stores job details in SQLite.
 
+### 2. Job Filtering
 
-The system is designed for fresher-level opportunities in:
+The filtering system considers:
 
+- Job title and role
+- Preferred locations
+- Experience requirements
+- Job freshness
+- Excluded seniority levels
+- Available recruiter contact details
 
+### 3. Application Automation
 
-\* Chennai
+The application engine supports:
 
-\* Hosur
+- Recruiter-email applications
+- Resume attachment
+- Configurable daily application limits
+- Duplicate application prevention
+- Application status tracking
 
-\* Bengaluru / Bangalore
+Direct web-form automation is designed to require review where additional verification, login, or user input is necessary.
 
+### 4. Application Tracking
 
+Tracks important application information, including:
 
-Target roles include Software Engineering, Java Development, Backend Development, Full Stack Development, Technical Support, IT Support, Application Support, QA/Testing, and related entry-level IT roles.
+- Company name
+- Job title
+- Job location
+- Application method
+- Application status
+- Application date
+- Recruiter email
+- Error or processing details
 
+### 5. Email Notifications
 
+The notification system supports:
 
-\## Key Features
+- Application confirmation emails
+- Daily application summaries
+- Application status information
 
+### 6. Flask Dashboard
 
+The local dashboard displays:
 
-\* Automated job collection from a public job feed
+- Total collected jobs
+- Applied jobs
+- Pending applications
+- Failed applications
+- Applications submitted today
+- Recent job listings
+- Application history
 
-\* Role-based job filtering
-
-\* Chennai, Hosur, and Bengaluru/Bangalore location filtering
-
-\* Fresher / 0–1 year experience filtering
-
-\* 7-day job freshness filtering
-
-\* Active-job and listing-quality filtering
-
-\* Duplicate-job detection
-
-\* SQLite-based job and application tracking
-
-\* Resume PDF attachment
-
-\* Automated recruiter-email applications
-
-\* Application status tracking
-
-\* Daily application limit
-
-\* Application confirmation emails
-
-\* Daily summary emails
-
-\* Windows Task Scheduler integration
-
-\* Automatic execution when the user logs into Windows
-
-\* Playwright foundation for direct web application forms
-
-\* Safeguards for unknown required fields, login pages, and CAPTCHA detection
-
-\* Local configuration through environment variables
-
-
-
-\## Technology Stack
-
-
-
-| Technology             | Purpose                             |
-
-| ---------------------- | ----------------------------------- |
-
-| Python                 | Core automation                     |
-
-| Requests               | Job-feed data retrieval             |
-
-| Playwright             | Browser automation                  |
-
-| SQLite                 | Job and application database        |
-
-| Flask                  | Local dashboard                     |
-
-| Gmail SMTP             | Application and notification emails |
-
-| python-dotenv          | Environment configuration           |
-
-| Windows Task Scheduler | Automatic execution                 |
-
-| Git / GitHub           | Version control and project hosting |
-
-
-
-\## System Architecture
-
-
-
-```text
-
-&#x20;                   ┌─────────────────────┐
-
-&#x20;                   │     Job Sources     │
-
-&#x20;                   └──────────┬──────────┘
-
-&#x20;                              │
-
-&#x20;                              ▼
-
-&#x20;                   ┌─────────────────────┐
-
-&#x20;                   │   Job Collector     │
-
-&#x20;                   │      Python         │
-
-&#x20;                   └──────────┬──────────┘
-
-&#x20;                              │
-
-&#x20;                              ▼
-
-&#x20;                   ┌─────────────────────┐
-
-&#x20;                   │    Job Filters      │
-
-&#x20;                   │ Role / Location /   │
-
-&#x20;                   │ Experience / Age    │
-
-&#x20;                   └──────────┬──────────┘
-
-&#x20;                              │
-
-&#x20;                              ▼
-
-&#x20;                   ┌─────────────────────┐
-
-&#x20;                   │      SQLite DB      │
-
-&#x20;                   │ Jobs + Applications │
-
-&#x20;                   └──────────┬──────────┘
-
-&#x20;                              │
-
-&#x20;                    ┌─────────┴─────────┐
-
-&#x20;                    │                   │
-
-&#x20;                    ▼                   ▼
-
-&#x20;          ┌─────────────────┐   ┌─────────────────┐
-
-&#x20;          │ Application      │   │ Local Dashboard │
-
-&#x20;          │ Engine           │   │     Flask       │
-
-&#x20;          └────────┬────────┘   └─────────────────┘
-
-&#x20;                   │
-
-&#x20;         ┌─────────┴─────────┐
-
-&#x20;         │                   │
-
-&#x20;         ▼                   ▼
-
-&#x20;┌──────────────────┐  ┌──────────────────┐
-
-&#x20;│ Recruiter Email  │  │ Direct Web Form  │
-
-&#x20;│ + Resume         │  │ Playwright       │
-
-&#x20;└────────┬─────────┘  └──────────────────┘
-
-&#x20;         │
-
-&#x20;         ▼
-
-&#x20;┌────────────────────────┐
-
-&#x20;│ Gmail Notifications    │
-
-&#x20;│ Confirmation + Summary │
-
-&#x20;└────────────────────────┘
-
-```
-
-
-
-\## Application Workflow
-
-
-
-```text
-
-Windows Login
-
-&#x20;     ↓
-
-JobAutomationBot starts
-
-&#x20;     ↓
-
-Collect jobs
-
-&#x20;     ↓
-
-Filter by:
-
-&#x20; • Target role
-
-&#x20; • Chennai / Hosur / Bengaluru
-
-&#x20; • Fresher / 0–1 year
-
-&#x20; • Recent listing
-
-&#x20; • Active listing
-
-&#x20;     ↓
-
-Check duplicate
-
-&#x20;     ↓
-
-Check application method
-
-&#x20;     ↓
-
-Recruiter email available?
-
-&#x20;     ↓
-
-Attach resume
-
-&#x20;     ↓
-
-Send application
-
-&#x20;     ↓
-
-Mark APPLIED
-
-&#x20;     ↓
-
-Send confirmation email
-
-&#x20;     ↓
-
-Update daily summary
-
-```
-
-
-
-\## Project Structure
-
-
-
-```text
-
-JobAutomationBot/
-
-│
-
-├── applications/
-
-│   ├── \_\_init\_\_.py
-
-│   ├── application\_bot.py
-
-│   ├── application\_rules.py
-
-│   ├── email\_apply.py
-
-│   ├── profile.py
-
-│   └── tracker.py
-
-│
-
-├── jobs/
-
-│   ├── \_\_init\_\_.py
-
-│   ├── database.py
-
-│   ├── hopin\_collector.py
-
-│   └── view\_jobs.py
-
-│
-
-├── notifications/
-
-│   ├── \_\_init\_\_.py
-
-│   └── email.py
-
-│
-
-├── resume/
-
-│   └── <your-resume>.pdf
-
-│
-
-├── data/
-
-│   └── jobs.db
-
-│
-
-├── logs/
-
-│   └── bot.log
-
-│
-
-├── venv/
-
-├── .env
-
-├── .gitignore
-
-├── config.py
-
-├── dashboard.py
-
-├── main.py
-
-├── requirements.txt
-
-└── run\_bot.bat
-
-```
-
-
-
-\## Configuration
-
-
-
-Job preferences are stored in `config.py`.
-
-
-
-Example:
-
-
-
-```python
-
-LOCATIONS = \[
-
-&#x20;   "Chennai",
-
-&#x20;   "Hosur",
-
-&#x20;   "Bengaluru",
-
-&#x20;   "Bangalore",
-
-]
-
-
-
-MAX\_EXPERIENCE\_YEARS = 1
-
-MAX\_JOB\_AGE\_DAYS = 7
-
-```
-
-
-
-Target roles and skills can be modified without changing the main application logic.
-
-
-
-\## Application Limits
-
-
-
-The application engine uses a daily safety limit.
-
-
-
-Current configuration:
-
-
-
-```python
-
-DAILY\_APPLICATION\_LIMIT = 3
-
-MAX\_APPLICATIONS\_PER\_RUN = 3
-
-```
-
-
-
-Already processed applications are stored in SQLite and are not submitted again.
-
-
-
-\## Application Status
-
-
-
-The database uses application states such as:
-
-
-
-```text
-
-NOT\_APPLIED
-
-READY
-
-APPLIED
-
-ERROR
-
-```
-
-
-
-This allows the system to track the application lifecycle and avoid duplicates.
-
-
-
-\## Email Notifications
-
-
-
-The system can send:
-
-
-
-1\. Application email to the recruiter
-
-2\. Confirmation email to the applicant
-
-3\. Daily job/application summary
-
-
-
-Credentials are stored locally in `.env`.
-
-
-
-Example:
-
-
-
-```text
-
-EMAIL\_SENDER=your-email@gmail.com
-
-EMAIL\_APP\_PASSWORD=your-app-password
-
-EMAIL\_RECEIVER=your-email@gmail.com
-
-```
-
-
-
-Never commit `.env` to GitHub.
-
-
-
-\## Security
-
-
-
-The following files should remain private:
-
-
-
-```text
-
-.env
-
-resume/\*.pdf
-
-data/\*.db
-
-venv/
-
-```
-
-
-
-The repository's `.gitignore` should prevent them from being committed.
-
-
-
-Application questions that the bot does not understand are not guessed automatically.
-
-
-
-\## Automation
-
-
-
-Windows Task Scheduler is configured to start the bot when the user logs into Windows.
-
-
-
-The startup flow is:
-
-
-
-```text
-
-Windows Login
-
-&#x20;     ↓
-
-30-second startup delay
-
-&#x20;     ↓
-
-run\_bot.bat
-
-&#x20;     ↓
-
-main.py
-
-```
-
-
-
-Logs are written to:
-
-
-
-```text
-
-logs/bot.log
-
-```
-
-
-
-\## Dashboard
-
-
-
-A local Flask dashboard is available for monitoring jobs and applications.
-
-
-
-Start it with:
-
-
-
-```bash
-
-python dashboard.py
-
-```
-
-
-
-Then open:
-
-
-
-```text
-
-http://127.0.0.1:5000
-
-```
-
-
-
-The dashboard displays:
-
-
-
-\* Total jobs
-
-\* Applied jobs
-
-\* Pending jobs
-
-\* Errors
-
-\* Applications today
-
-\* Recent jobs
-
-\* Application history
-
-
-
-\## Running the Bot Manually
-
-
-
-Activate the virtual environment:
-
-
-
-```bash
-
-venv\\Scripts\\activate
-
-```
-
-
-
-Run:
-
-
-
-```bash
-
-python main.py
-
-```
-
-
-
-\## Testing
-
-
-
-Syntax checks:
-
-
-
-```bash
-
-python -m py\_compile main.py
-
-python -m py\_compile jobs/hopin\_collector.py
-
-python -m py\_compile applications/email\_apply.py
-
-python -m py\_compile applications/application\_bot.py
-
-```
-
-
-
-Run the collector:
-
-
-
-```bash
-
-python -m jobs.hopin\_collector
-
-```
-
-
-
-View stored jobs:
-
-
-
-```bash
-
-python -m jobs.view\_jobs
-
-```
-
-
-
-Run the application engine:
-
-
-
-```bash
-
-python -m applications.email\_apply
-
-```
-
-
-
-\## Current Application Strategy
-
-
-
-The current automatic application route is recruiter email with resume attachment.
-
-
-
-Direct application forms have a Playwright-based foundation that can:
-
-
-
-\* Open the form
-
-\* Fill recognized profile fields
-
-\* Upload the resume
-
-\* Detect CAPTCHA
-
-\* Detect login requirements
-
-\* Detect unfilled required fields
-
-
-
-The bot does not guess unknown application answers.
-
-
-
-LinkedIn account activity is not automated.
-
-
-
-\## Future Improvements
-
-
-
-\* More job-source integrations
-
-\* Better job-ranking and matching
-
-\* Direct application-form automation for compatible sites
-
-\* Application analytics
-
-\* Recruiter-response tracking
-
-\* Job-status monitoring
-
-\* Improved dashboard charts
-
-\* Resume/job-description matching
-
-\* Configurable application schedules
-
-\* Automated GitHub reporting
-
-
-## Dashboard Preview
+### Dashboard Preview
 
 ![Dashboard Preview](docs/screenshots/dashboard.png)
 
+---
 
+## 🛠️ Technologies Used
 
-\## Disclaimer
+| Technology | Purpose |
+|---|---|
+| Python | Core application development |
+| Playwright | Browser automation foundation |
+| Flask | Local dashboard |
+| SQLite | Job and application storage |
+| Requests | API communication |
+| SMTP | Email notifications and applications |
+| python-dotenv | Environment configuration |
+| Windows Task Scheduler | Scheduled execution |
+| Git & GitHub | Version control |
 
+---
 
+## 🏗️ Project Architecture
 
-Job listings and application requirements can change. Automated applications should be used only with sources and workflows that permit the relevant automation. The system should not bypass CAPTCHA, authentication controls, or website restrictions.
+```text
+Public Job API
+      │
+      ▼
+Job Collector
+      │
+      ▼
+Job Filtering
+(Role, Location, Experience, Freshness)
+      │
+      ▼
+SQLite Database
+      │
+      ▼
+Application Engine
+      │
+      ├── Recruiter Email Application
+      │        │
+      │        ▼
+      │   Gmail SMTP + Resume
+      │
+      └── Direct Web Form
+               │
+               ▼
+         Review Required
+      │
+      ▼
+Application Tracking
+      │
+      ▼
+Email Notifications
+      │
+      ▼
+Flask Dashboard
 
+Windows Task Scheduler
+          │
+          ▼
+       main.py
+```
 
+---
 
-\## Resume Project Description
+## 📂 Project Structure
 
+```text
+JobAutomationBot/
+│
+├── applications/
+│   ├── __init__.py
+│   ├── application_bot.py
+│   ├── application_rules.py
+│   ├── email_apply.py
+│   ├── profile.py
+│   └── tracker.py
+│
+├── data/
+│   └── jobs.db
+│
+├── docs/
+│   └── screenshots/
+│       └── dashboard.png
+│
+├── jobs/
+│   ├── __init__.py
+│   ├── collector.py
+│   ├── database.py
+│   ├── hopin_collector.py
+│   └── view_jobs.py
+│
+├── notifications/
+│   ├── __init__.py
+│   └── email.py
+│
+├── resume/
+│   └── Subash_M_Resume.pdf
+│
+├── logs/
+│   └── bot.log
+│
+├── .env
+├── .gitignore
+├── config.py
+├── dashboard.py
+├── main.py
+├── requirements.txt
+├── README.md
+└── run_bot.bat
+```
 
+> Personal credentials, resume files, databases, and logs should not be committed to the public repository.
 
-\*\*Job Application Automation Bot — Python, Playwright, SQLite, Flask, Gmail SMTP\*\*
+---
 
+## ⚙️ Requirements
 
+- Windows 10 or Windows 11
+- Python 3.10 or later
+- Git
+- Gmail account with SMTP access
+- Internet connection
 
-Built an automated job-search and application pipeline that collects entry-level IT opportunities, filters jobs by location, role, experience and freshness, prevents duplicate processing, automates recruiter-email applications with resume attachments, tracks application status in SQLite, sends email notifications, and executes automatically through Windows Task Scheduler.
+---
 
+## 🚀 Installation
 
+### 1. Clone the Repository
 
+```bash
+git clone https://github.com/Subash0512/JobAutomationBot.git
+```
+
+### 2. Open the Project Directory
+
+```bash
+cd JobAutomationBot
+```
+
+### 3. Create a Virtual Environment
+
+```bash
+python -m venv venv
+```
+
+### 4. Activate the Virtual Environment
+
+```bash
+venv\Scripts\activate
+```
+
+### 5. Install Dependencies
+
+```bash
+pip install -r requirements.txt
+```
+
+### 6. Install Playwright Browser
+
+```bash
+playwright install chromium
+```
+
+---
+
+## 🔐 Configuration
+
+Create a `.env` file in the project root.
+
+Example:
+
+```env
+GMAIL_SENDER=your_email@gmail.com
+GMAIL_APP_PASSWORD=your_app_password
+GMAIL_RECEIVER=your_email@gmail.com
+```
+
+Use a Gmail App Password rather than your regular Gmail password.
+
+**Important:**
+
+- Never publish your `.env` file.
+- Never expose API keys or email credentials.
+- Revoke exposed credentials immediately.
+- Keep personal information in local configuration files.
+
+---
+
+## 📄 Resume Configuration
+
+Place your resume in the local `resume` directory.
+
+Example:
+
+```text
+resume/Subash_M_Resume.pdf
+```
+
+Update the resume path in the application configuration if required.
+
+---
+
+## ▶️ Running the Bot
+
+From the project directory:
+
+```bash
+venv\Scripts\python.exe main.py
+```
+
+The bot will:
+
+1. Collect available job listings.
+2. Filter relevant opportunities.
+3. Save jobs to the database.
+4. Process eligible applications.
+5. Track application results.
+6. Send email notifications.
+
+---
+
+## 📊 Running the Dashboard
+
+Start the Flask dashboard:
+
+```bash
+venv\Scripts\python.exe dashboard.py
+```
+
+Open the following address in your browser:
+
+```text
+http://127.0.0.1:5000
+```
+
+Keep the terminal window running while using the dashboard.
+
+Press `CTRL+C` in the terminal to stop the dashboard.
+
+---
+
+## ⏰ Scheduled Execution
+
+The project can be configured to run automatically using Windows Task Scheduler.
+
+The batch file used for execution is:
+
+```text
+run_bot.bat
+```
+
+The scheduled task should be configured according to the user's preferred execution frequency and Windows permissions.
+
+---
+
+## 🛡️ Safety and Responsible Automation
+
+This project is designed with controlled automation in mind.
+
+- Uses configurable application limits.
+- Avoids storing sensitive credentials in Git.
+- Does not bypass CAPTCHA or security verification.
+- Does not guess application answers.
+- Requires review for application flows that need additional user input.
+- Does not automate restricted LinkedIn login or scraping workflows.
+- Uses recruiter-email applications when suitable contact information is available.
+
+Always review application content and ensure that applications comply with the policies of the relevant job platform.
+
+---
+
+## 🔮 Future Improvements
+
+Planned improvements include:
+
+- Improved job-source integrations
+- Better duplicate detection
+- Resume-to-job matching
+- Keyword-based skill matching
+- Application analytics
+- Enhanced dashboard filters
+- Application reminder notifications
+- Improved direct web-form review workflow
+- More configurable job preferences
+- Unit and integration testing
+- Deployment documentation
+
+---
+
+## 🧠 Skills Demonstrated
+
+This project demonstrates practical experience with:
+
+- Python programming
+- Object-oriented programming
+- REST API integration
+- Web automation concepts
+- Database management
+- SQLite queries
+- Email automation
+- Flask web development
+- Environment variable management
+- Task scheduling
+- Git and GitHub
+- Error handling
+- Automation workflow design
+
+---
+
+## 👨‍💻 Author
+
+**Subash M**
+
+B.E. Information Technology Graduate
+
+GitHub: [Subash0512](https://github.com/Subash0512)
+
+---
+
+## 📜 License
+
+This project is intended for educational and personal portfolio purposes.
+
+Add an appropriate open-source license before distributing the project for public reuse.
