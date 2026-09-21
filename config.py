@@ -12,6 +12,15 @@ JOB_ROLES = [
     "Junior Software Developer",
     "Associate Software Engineer",
     "Graduate Engineer Trainee",
+    "Python Developer",
+    "Python Engineer",
+    "Junior Python Developer",
+    "Data Analyst",
+    "Junior Data Analyst",
+    "Business Data Analyst",
+    "Software Developer",
+    "Junior Software Developer",
+    "Associate Software Developer",
 
     # Technical Support / IT Support
     "Technical Support Engineer",

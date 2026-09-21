@@ -24,10 +24,10 @@ from notifications.email import (
 DRY_RUN = False
 
 # Maximum applications in one bot execution
-MAX_APPLICATIONS_PER_RUN = 3
+MAX_APPLICATIONS_PER_RUN = 20
 
 # Maximum successful applications per calendar day
-DAILY_APPLICATION_LIMIT = 3
+DAILY_APPLICATION_LIMIT = 20
 
 # User's local timezone
 LOCAL_TIMEZONE = ZoneInfo("Asia/Kolkata")
