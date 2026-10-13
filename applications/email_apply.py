@@ -12,6 +12,7 @@ from jobs.database import get_connection
 from notifications.email import (
     send_application,
     send_application_confirmation,
+    send_manual_application_notification,
 )
 
 
@@ -19,18 +20,23 @@ from notifications.email import (
 # SETTINGS
 # ==========================================================
 
-# False = send real applications
-# True  = test only
-DRY_RUN = False
+# False = real recruiter applications
+# True  = do not send recruiter applications
+DRY_RUN = True
 
-# Maximum applications in one bot execution
+# Maximum automatic recruiter-email applications
+# in one execution.
 MAX_APPLICATIONS_PER_RUN = 20
 
-# Maximum successful applications per calendar day
+# Maximum successful automatic applications per day.
 DAILY_APPLICATION_LIMIT = 20
 
-# User's local timezone
-LOCAL_TIMEZONE = ZoneInfo("Asia/Kolkata")
+# Maximum manual notifications sent to the user per run.
+MAX_MANUAL_NOTIFICATIONS_PER_RUN = 20
+
+LOCAL_TIMEZONE = ZoneInfo(
+    "Asia/Kolkata"
+)
 
 
 # ==========================================================
@@ -38,9 +44,6 @@ LOCAL_TIMEZONE = ZoneInfo("Asia/Kolkata")
 # ==========================================================
 
 def get_today_application_count():
-    """
-    Count successful applications made today in India time.
-    """
 
     connection = get_connection()
     cursor = connection.cursor()
@@ -58,7 +61,9 @@ def get_today_application_count():
 
     connection.close()
 
-    today = datetime.now(LOCAL_TIMEZONE).date()
+    today = datetime.now(
+        LOCAL_TIMEZONE
+    ).date()
 
     count = 0
 
@@ -70,31 +75,43 @@ def get_today_application_count():
             continue
 
         try:
-            timestamp = datetime.fromisoformat(applied_at)
+
+            timestamp = datetime.fromisoformat(
+                applied_at
+            )
 
             if timestamp.tzinfo is None:
-                timestamp = timestamp.replace(
-                    tzinfo=timezone.utc
+
+                timestamp = (
+                    timestamp.replace(
+                        tzinfo=timezone.utc
+                    )
                 )
 
-            local_date = timestamp.astimezone(
-                LOCAL_TIMEZONE
-            ).date()
+            local_date = (
+                timestamp
+                .astimezone(
+                    LOCAL_TIMEZONE
+                )
+                .date()
+            )
 
             if local_date == today:
                 count += 1
 
         except ValueError:
+
             continue
 
     return count
 
 
 # ==========================================================
-# GET PENDING JOBS
+# AUTOMATIC RECRUITER-EMAIL JOBS
 # ==========================================================
 
 def get_pending_applications(limit):
+
     connection = get_connection()
     cursor = connection.cursor()
 
@@ -114,6 +131,7 @@ def get_pending_applications(limit):
           AND recruiter_email IS NOT NULL
           AND recruiter_email != ''
           AND apply_method = 'RECRUITER_EMAIL'
+          AND experience = 'Fresher / 0-1 year'
         ORDER BY
             CASE
                 WHEN application_status = 'READY' THEN 0
@@ -126,23 +144,66 @@ def get_pending_applications(limit):
     )
 
     jobs = cursor.fetchall()
-
     connection.close()
 
     return jobs
 
+# ==========================================================
+# MANUAL APPLICATION JOBS
+# ==========================================================
+def get_manual_application_jobs(limit):
+
+    connection = get_connection()
+    cursor = connection.cursor()
+
+    cursor.execute(
+        """
+        SELECT
+            id,
+            company,
+            title,
+            location,
+            job_url,
+            apply_url,
+            apply_method
+        FROM jobs
+        WHERE application_status = 'NOT_APPLIED'
+          AND apply_url IS NOT NULL
+          AND apply_url != ''
+          AND apply_method IN (
+              'GOOGLE_FORM',
+              'CAREER_PAGE',
+              'LINKEDIN_POST',
+              'EXTERNAL_APPLICATION',
+              'MANUAL_REVIEW'
+          )
+        ORDER BY posted_at DESC
+        LIMIT ?
+        """,
+        (limit,),
+    )
+
+    jobs = cursor.fetchall()
+    connection.close()
+
+    return jobs
 
 # ==========================================================
 # UPDATE STATUS
 # ==========================================================
 
-def update_job_status(job_id, status):
+def update_job_status(
+    job_id,
+    status,
+):
+
     connection = get_connection()
     cursor = connection.cursor()
 
     applied_at = None
 
     if status == "APPLIED":
+
         applied_at = datetime.now(
             timezone.utc
         ).isoformat()
@@ -152,7 +213,10 @@ def update_job_status(job_id, status):
         UPDATE jobs
         SET
             application_status = ?,
-            applied_at = COALESCE(?, applied_at)
+            applied_at = COALESCE(
+                ?,
+                applied_at
+            )
         WHERE id = ?
         """,
         (
@@ -167,48 +231,157 @@ def update_job_status(job_id, status):
 
 
 # ==========================================================
-# MAIN
+# MANUAL APPLICATION PROCESSING
 # ==========================================================
 
-def main():
-
-    validate_profile()
-
-    # ----------------------------------------------
-    # Check today's application count
-    # ----------------------------------------------
-
-    today_count = get_today_application_count()
+def process_manual_applications():
 
     print()
     print("=" * 75)
-    print("JOB APPLICATION RUNNER")
+    print("CHECKING MANUAL APPLICATIONS")
+    print("=" * 75)
+
+    jobs = get_manual_application_jobs(
+        MAX_MANUAL_NOTIFICATIONS_PER_RUN
+    )
+
+    if not jobs:
+
+        print()
+        print(
+            "No new manual application links found."
+        )
+
+        return 0
+
+    notifications_sent = 0
+
+    for job in jobs:
+
+        (
+            job_id,
+            company,
+            title,
+            location,
+            job_url,
+            apply_url,
+            apply_method,
+        ) = job
+
+        print()
+        print("-" * 75)
+
+        print(
+            f"ID            : {job_id}"
+        )
+
+        print(
+            f"Company       : {company}"
+        )
+
+        print(
+            f"Role          : {title}"
+        )
+
+        print(
+            f"Location      : {location}"
+        )
+
+        print(
+            f"Method        : {apply_method}"
+        )
+
+        print(
+            f"Application   : {apply_url}"
+        )
+
+        print(
+            f"Job URL       : {job_url}"
+        )
+
+        try:
+
+            send_manual_application_notification(
+                company=company,
+                role=title,
+                location=location,
+                apply_method=apply_method,
+                application_url=apply_url,
+                job_url=job_url,
+            )
+
+            # Prevent the same manual notification
+            # from being sent again on every run.
+            update_job_status(
+                job_id,
+                "REVIEW_REQUIRED",
+            )
+
+            notifications_sent += 1
+
+            print()
+            print(
+                "Status: REVIEW_REQUIRED"
+            )
+
+        except Exception as error:
+
+            # Leave it NOT_APPLIED so a future run
+            # can retry the notification.
+            print()
+            print(
+                "Manual notification failed:"
+            )
+            print(error)
+
+    print()
+    print(
+        f"Manual notifications sent : "
+        f"{notifications_sent}"
+    )
+
+    return notifications_sent
+
+
+# ==========================================================
+# AUTOMATIC RECRUITER APPLICATIONS
+# ==========================================================
+
+def process_email_applications():
+
+    validate_profile()
+
+    today_count = (
+        get_today_application_count()
+    )
+
+    print()
+    print("=" * 75)
+    print("AUTOMATIC EMAIL APPLICATIONS")
     print("=" * 75)
 
     print(
         f"Applications today : "
-        f"{today_count}/{DAILY_APPLICATION_LIMIT}"
+        f"{today_count}/"
+        f"{DAILY_APPLICATION_LIMIT}"
     )
 
-    if today_count >= DAILY_APPLICATION_LIMIT:
+    if (
+        today_count
+        >= DAILY_APPLICATION_LIMIT
+    ):
 
         print()
         print(
-            "Daily application limit reached."
+            "Daily automatic application "
+            "limit reached."
         )
-        print(
-            "No applications will be sent today."
-        )
-        print("=" * 75)
 
-        return
-
-    # ----------------------------------------------
-    # Calculate remaining capacity
-    # ----------------------------------------------
+        return 0
 
     remaining_today = (
-        DAILY_APPLICATION_LIMIT - today_count
+        DAILY_APPLICATION_LIMIT
+        - today_count
     )
 
     applications_this_run = min(
@@ -226,10 +399,6 @@ def main():
         f"{applications_this_run}"
     )
 
-    # ----------------------------------------------
-    # Get pending jobs
-    # ----------------------------------------------
-
     jobs = get_pending_applications(
         applications_this_run
     )
@@ -238,15 +407,11 @@ def main():
 
         print()
         print(
-            "No pending email applications found."
+            "No pending recruiter-email "
+            "applications found."
         )
-        print("=" * 75)
 
-        return
-
-    # ----------------------------------------------
-    # Process jobs
-    # ----------------------------------------------
+        return 0
 
     successful_this_run = 0
 
@@ -265,13 +430,34 @@ def main():
 
         print()
         print("-" * 75)
-        print(f"ID            : {job_id}")
-        print(f"Company       : {company}")
-        print(f"Role          : {title}")
-        print(f"Location      : {location}")
-        print(f"Recruiter     : {recruiter_email}")
-        print(f"Method        : {apply_method}")
-        print(f"Job URL       : {job_url}")
+
+        print(
+            f"ID            : {job_id}"
+        )
+
+        print(
+            f"Company       : {company}"
+        )
+
+        print(
+            f"Role          : {title}"
+        )
+
+        print(
+            f"Location      : {location}"
+        )
+
+        print(
+            f"Recruiter     : {recruiter_email}"
+        )
+
+        print(
+            f"Method        : {apply_method}"
+        )
+
+        print(
+            f"Job URL       : {job_url}"
+        )
 
         try:
 
@@ -298,8 +484,13 @@ def main():
                 )
 
                 print()
-                print("Status: READY")
-                print("No email was sent.")
+                print(
+                    "Status: READY"
+                )
+
+                print(
+                    "No recruiter email was sent."
+                )
 
             # --------------------------------------
             # REAL APPLICATION
@@ -315,10 +506,12 @@ def main():
                 successful_this_run += 1
 
                 print()
-                print("Status: APPLIED")
+                print(
+                    "Status: APPLIED"
+                )
 
                 # ----------------------------------
-                # Send confirmation to applicant
+                # Applicant confirmation
                 # ----------------------------------
 
                 try:
@@ -336,15 +529,13 @@ def main():
 
                     print()
                     print(
-                        "Application was sent, but "
-                        "confirmation email failed:"
+                        "Application was sent, "
+                        "but confirmation email failed:"
                     )
 
-                    print(confirmation_error)
-
-            # --------------------------------------
-            # Unexpected result
-            # --------------------------------------
+                    print(
+                        confirmation_error
+                    )
 
             else:
 
@@ -364,39 +555,82 @@ def main():
             print(
                 "Application failed:"
             )
+
             print(error)
 
-    # ----------------------------------------------
-    # Final summary
-    # ----------------------------------------------
+    return successful_this_run
 
-    final_today_count = (
-        get_today_application_count()
-    )
+
+# ==========================================================
+# MAIN
+# ==========================================================
+
+def main():
 
     print()
     print("=" * 75)
+    print("APPLICATION PROCESSOR")
+    print("=" * 75)
 
-    if DRY_RUN:
+    # Manual notifications are independent of the
+    # automatic 20/day application limit.
+    try:
 
-        print("DRY RUN COMPLETE")
-        print("NO APPLICATIONS WERE SENT")
-
-    else:
-
-        print("APPLICATION RUN COMPLETE")
-        print(
-            f"Successful this run : "
-            f"{successful_this_run}"
+        manual_notifications = (
+            process_manual_applications()
         )
+
+    except Exception as error:
+
+        print()
         print(
-            f"Applications today  : "
-            f"{final_today_count}/"
-            f"{DAILY_APPLICATION_LIMIT}"
+            "Manual application processing failed:"
         )
+
+        print(error)
+
+        manual_notifications = 0
+
+    # Automatic recruiter applications.
+    try:
+
+        successful_applications = (
+            process_email_applications()
+        )
+
+    except Exception as error:
+
+        print()
+        print(
+            "Automatic application processing failed:"
+        )
+
+        print(error)
+
+        successful_applications = 0
+
+    print()
+    print("=" * 75)
+    print(
+        "APPLICATION PROCESSING COMPLETE"
+    )
+    print("=" * 75)
+
+    print(
+        f"Automatic applications : "
+        f"{successful_applications}"
+    )
+
+    print(
+        f"Manual notifications   : "
+        f"{manual_notifications}"
+    )
 
     print("=" * 75)
 
+    return successful_applications
+
 
 if __name__ == "__main__":
+
     main()

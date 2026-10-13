@@ -1,5 +1,9 @@
+import os
 import re
+from datetime import datetime, timezone
+
 import requests
+from dotenv import load_dotenv
 
 from config import (
     JOB_ROLES,
@@ -11,39 +15,79 @@ from config import (
 from jobs.database import get_connection
 
 
-API_URL = "https://api.hopinjobs.com/api/jobs"
+# ==========================================================
+# JOOBLE SETTINGS
+# ==========================================================
+
+load_dotenv()
+
+JOOBLE_API_KEY = os.getenv("JOOBLE_API_KEY")
+
+JOOBLE_API_URL = (
+    f"https://in.jooble.org/api/{JOOBLE_API_KEY}"
+    if JOOBLE_API_KEY
+    else ""
+)
+
+# Six requests per run: three locations x two searches.
+# Keep this low because the free key has a limited quota.
+MAX_API_REQUESTS_PER_RUN = 6
+RESULTS_PER_REQUEST = 10
+REQUEST_TIMEOUT = 30
 
 
 # ==========================================================
-# JOB TITLE FILTERS
+# ROLE FILTERS
 # ==========================================================
 
 EXCLUDED_TITLE_WORDS = [
     "senior",
     "sr.",
-    "sr ",
     "lead",
     "principal",
     "staff",
     "manager",
     "director",
     "head",
+    "architect",
 ]
 
 
 ROLE_KEYWORDS = [
+    # Software development
     "software engineer",
     "software developer",
     "software development engineer",
     "sde",
     "java developer",
+    "java engineer",
     "java backend",
     "backend developer",
     "spring boot",
     "full stack",
+    "full-stack",
     "associate software",
     "junior software",
     "graduate engineer",
+    "graduate software",
+
+    # Python development
+    "python developer",
+    "python engineer",
+    "junior python developer",
+    "python backend",
+    "django developer",
+    "flask developer",
+
+    # Data
+    "data analyst",
+    "junior data analyst",
+    "business data analyst",
+    "data analytics",
+    "data engineer",
+    "junior data engineer",
+
+    # Technical / IT support
     "technical support",
     "technical support engineer",
     "technical support executive",
@@ -56,25 +100,95 @@ ROLE_KEYWORDS = [
     "service desk",
     "help desk",
     "system support",
+    "technical associate",
+
+    # Testing / QA
     "software tester",
     "qa engineer",
     "junior qa",
     "test engineer",
     "automation test",
+    "qa tester",
+    "quality analyst",
+
+    # Other entry-level IT
     "system engineer",
     "associate engineer",
     "it analyst",
     "application engineer",
-    "technical associate",
 ]
 
 
 # ==========================================================
-# HELPERS
+# SEARCH GROUPS
+# ==========================================================
+
+# These are strings, not one-element tuples.
+
+SEARCH_GROUPS = [
+    (
+        "fresher junior entry level graduate trainee "
+        "software developer java developer python developer "
+        "backend full stack software engineer SDE"
+    ),
+    (
+        "fresher junior entry level graduate trainee "
+        "data analyst technical support IT support "
+        "QA tester test engineer system engineer "
+        "application support"
+    ),
+]
+
+
+# ==========================================================
+# GENERAL HELPERS
 # ==========================================================
 
 def normalize(value):
-    return " ".join((value or "").lower().split())
+    return " ".join(
+        str(value or "").lower().split()
+    )
+
+
+def clean_text(value):
+    return str(value or "").strip()
+
+
+# ==========================================================
+# LOCATION SEARCH
+# ==========================================================
+
+def get_api_locations():
+    """
+    Avoid duplicate searches for Bangalore and Bengaluru.
+    """
+
+    locations = []
+    seen = set()
+
+    for location in LOCATIONS:
+
+        value = normalize(location)
+
+        if value in ("bengaluru", "bangalore"):
+            canonical = "Bengaluru"
+
+        elif value == "chennai":
+            canonical = "Chennai"
+
+        elif value == "hosur":
+            canonical = "Hosur"
+
+        else:
+            canonical = clean_text(location)
+
+        key = normalize(canonical)
+
+        if key and key not in seen:
+            seen.add(key)
+            locations.append(canonical)
+
+    return locations
 
 
 # ==========================================================
@@ -82,21 +196,27 @@ def normalize(value):
 # ==========================================================
 
 def role_matches(title):
+
     title_text = normalize(title)
 
-    # Reject senior/management positions.
+    # Reject senior and management titles.
     for excluded in EXCLUDED_TITLE_WORDS:
+
         if excluded in title_text:
             return False
 
-    # Check configured roles.
+    # Check roles configured in config.py.
     for role in JOB_ROLES:
-        if normalize(role) in title_text:
+
+        role_text = normalize(role)
+
+        if role_text and role_text in title_text:
             return True
 
-    # Check related roles.
+    # Check our additional role keywords.
     for keyword in ROLE_KEYWORDS:
-        if keyword in title_text:
+
+        if normalize(keyword) in title_text:
             return True
 
     return False
@@ -107,13 +227,6 @@ def role_matches(title):
 # ==========================================================
 
 def location_matches(location):
-    """
-    Accept only:
-        Chennai
-        Hosur
-        Bengaluru
-        Bangalore
-    """
 
     location_text = normalize(location)
 
@@ -132,7 +245,8 @@ def location_matches(location):
             configured,
             [configured],
         ):
-            if alias in location_text:
+
+            if alias and alias in location_text:
                 return True
 
     return False
@@ -145,91 +259,70 @@ def location_matches(location):
 def get_experience_info(job):
     """
     Returns:
-        (True, experience_label)
-        (False, rejection_reason)
+        (False, reason)
+            Confirmed unsuitable or experienced role.
 
-    Target:
-        Fresher / 0-1 year
+        (True, "Fresher / 0-1 year")
+            Explicit evidence of entry-level suitability.
+
+        (True, "Experience not stated - manual review")
+            Experience unclear. Keep for review, not auto-apply.
     """
 
     title = normalize(job.get("title"))
-    description = normalize(job.get("description"))
+    snippet = normalize(job.get("snippet"))
 
-    criteria = job.get("criteria", [])
+    text = f"{title} {snippet}"
 
-    if isinstance(criteria, list):
-        criteria_text = normalize(
-            " ".join(criteria)
-        )
-    else:
-        criteria_text = normalize(criteria)
-
-    preferred = job.get(
-        "preferred_qualifications",
-        [],
-    )
-
-    if isinstance(preferred, list):
-        preferred_text = normalize(
-            " ".join(preferred)
-        )
-    else:
-        preferred_text = normalize(preferred)
-
-    text = (
-        f"{title} "
-        f"{description} "
-        f"{criteria_text} "
-        f"{preferred_text}"
-    )
-
-    # ----------------------------------------------
-    # Explicit senior-level rejection
-    # ----------------------------------------------
-
-    rejected_terms = [
-        "senior",
-        "sr.",
-        "lead",
-        "principal",
-        "staff",
-        "manager",
-        "director",
-    ]
+    # ------------------------------------------------------
+    # Reject senior / management titles.
+    # ------------------------------------------------------
 
     if any(
-        term in text
-        for term in rejected_terms
+        term in title
+        for term in EXCLUDED_TITLE_WORDS
     ):
-        return False, "Senior/management"
+        return False, "Senior/management title"
 
-    # ----------------------------------------------
-    # Experience ranges
-    # ----------------------------------------------
+    if re.search(
+        r"\b(experienced professional|"
+        r"experienced candidate|"
+        r"experienced developer)\b",
+        text,
+    ):
+        return False, "Experienced role"
+
+    # ------------------------------------------------------
+    # Explicit experience ranges, e.g. 2-4 years.
+    # ------------------------------------------------------
 
     range_patterns = [
         r"(\d+)\s*-\s*(\d+)\s*years?",
-        r"(\d+)\s*to\s*(\d+)\s*years?",
+        r"(\d+)\s+to\s+(\d+)\s*years?",
     ]
 
     for pattern in range_patterns:
 
-        matches = re.findall(
+        for minimum, maximum in re.findall(
             pattern,
             text,
-        )
+        ):
 
-        for match in matches:
-
-            minimum = int(match[0])
-            maximum = int(match[1])
+            minimum = int(minimum)
+            maximum = int(maximum)
 
             if maximum > MAX_EXPERIENCE_YEARS:
-                return False, f"{minimum}-{maximum} years"
 
-    # ----------------------------------------------
-    # X+ years
-    # ----------------------------------------------
+                return (
+                    False,
+                    f"Requires {minimum}-{maximum} years",
+                )
+
+    # ------------------------------------------------------
+    # Requirements such as 2+ years or 3+ years.
+    #
+    # "1+ years" is not treated as proof of a fresher role.
+    # ------------------------------------------------------
 
     plus_matches = re.findall(
         r"(\d+)\s*\+\s*years?",
@@ -240,120 +333,406 @@ def get_experience_info(job):
 
         years = int(value)
 
-        if years > MAX_EXPERIENCE_YEARS:
-            return False, f"{years}+ years"
+        if years >= MAX_EXPERIENCE_YEARS:
 
-    # ----------------------------------------------
-    # "X years of experience"
-    # ----------------------------------------------
+            return (
+                False,
+                f"Requires {years}+ years",
+            )
 
-    single_year_matches = re.findall(
-        r"(\d+)\s+years?\s+(?:of\s+)?experience",
-        text,
-    )
+    # ------------------------------------------------------
+    # Requirements such as:
+    # 2 years of experience
+    # minimum 3 years
+    # at least 2 years
+    # ------------------------------------------------------
 
-    for value in single_year_matches:
+    experience_patterns = [
+        r"(\d+)\s+years?\s+of\s+experience",
+        r"(\d+)\s+years?\s+experience",
+        r"minimum\s+(\d+)\s+years?",
+        r"at\s+least\s+(\d+)\s+years?",
+        r"minimum\s+of\s+(\d+)\s+years?",
+    ]
 
-        years = int(value)
+    for pattern in experience_patterns:
 
-        if years > MAX_EXPERIENCE_YEARS:
-            return False, f"{years}+ years"
+        for value in re.findall(
+            pattern,
+            text,
+        ):
 
-    # ----------------------------------------------
-    # Fresher indicators
-    # ----------------------------------------------
+            years = int(value)
+
+            if years > MAX_EXPERIENCE_YEARS:
+
+                return (
+                    False,
+                    f"Requires {years}+ years",
+                )
+
+    # ------------------------------------------------------
+    # Explicit fresher / entry-level indicators.
+    # ------------------------------------------------------
 
     fresher_terms = [
         "fresher",
         "freshers",
+        "fresh graduate",
+        "recent graduate",
         "entry level",
         "entry-level",
-        "graduate",
+        "graduate trainee",
         "trainee",
+        "junior",
         "no experience",
+        "without experience",
+        "experience not required",
         "0-1 year",
         "0 to 1 year",
-        "0 year",
-        "1 year",
+        "0-1 years",
+        "0 to 1 years",
     ]
 
     if any(
         term in text
         for term in fresher_terms
     ):
+
         return True, "Fresher / 0-1 year"
 
-    # Hopin's feed is entry-level oriented.
-    return True, "Entry-level / experience not stated"
+    # ------------------------------------------------------
+    # Explicit zero/one-year experience.
+    # ------------------------------------------------------
+
+    zero_one_patterns = [
+        r"\b0\s*years?\b",
+        r"\b1\s*year\b",
+        r"\b0\s*-\s*1\s*years?\b",
+        r"\b0\s+to\s+1\s*years?\b",
+    ]
+
+    for pattern in zero_one_patterns:
+
+        if re.search(pattern, text):
+
+            return True, "Fresher / 0-1 year"
+
+    # ------------------------------------------------------
+    # Unknown experience: do not assume it is a fresher job.
+    # ------------------------------------------------------
+
+    return (
+        True,
+        "Experience not stated - manual review",
+    )
 
 
 # ==========================================================
-# APPLICATION URL
+# DATE HANDLING
 # ==========================================================
 
-def get_application_url(job):
+def parse_updated_date(value):
 
-    if job.get("apply_form_url"):
-        return job.get("apply_form_url")
+    if not value:
+        return None
 
-    if job.get("apply_url"):
-        return job.get("apply_url")
+    text = str(value).strip()
+
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+
+    try:
+
+        parsed = datetime.fromisoformat(text)
+
+    except ValueError:
+
+        # Some APIs return more than six fractional digits.
+        trimmed = re.sub(
+            r"(\.\d{6})\d+",
+            r"\1",
+            text,
+        )
+
+        try:
+            parsed = datetime.fromisoformat(trimmed)
+
+        except ValueError:
+            return None
+
+    if parsed.tzinfo is None:
+
+        parsed = parsed.replace(
+            tzinfo=timezone.utc
+        )
+
+    return parsed.astimezone(
+        timezone.utc
+    )
+
+
+def get_age_days(updated):
+
+    parsed = parse_updated_date(updated)
+
+    if parsed is None:
+        return None
+
+    seconds = (
+        datetime.now(timezone.utc) - parsed
+    ).total_seconds()
+
+    return max(seconds / 86400, 0)
+
+
+def is_fresh(updated):
+
+    age = get_age_days(updated)
+
+    # We cannot confirm freshness if no usable timestamp exists.
+    if age is None:
+        return False
+
+    return age <= MAX_JOB_AGE_DAYS
+
+
+# ==========================================================
+# URL AND EMAIL EXTRACTION
+# ==========================================================
+
+URL_PATTERN = re.compile(
+    r"https?://[^\s<>\"]+",
+    re.IGNORECASE,
+)
+
+
+def extract_urls(text):
+
+    if not text:
+        return []
+
+    urls = []
+
+    for url in URL_PATTERN.findall(str(text)):
+
+        url = url.rstrip(
+            ".,);]}"
+        )
+
+        if url not in urls:
+            urls.append(url)
+
+    return urls
+
+
+def extract_recruiter_email(snippet):
+
+    match = re.search(
+        r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b",
+        snippet or "",
+        re.IGNORECASE,
+    )
+
+    if match:
+        return match.group(0)
 
     return ""
 
 
 # ==========================================================
-# APPLICATION METHOD
+# APPLICATION METHOD CLASSIFICATION
 # ==========================================================
 
-def get_apply_method(job):
+def classify_application(snippet, source):
+    """
+    Returns:
+        (application_method, destination)
 
-    if job.get("apply_form_url"):
-        return "DIRECT_FORM"
+    The destination may be empty when Jooble gives us
+    only the source domain, not the employer application URL.
+    """
 
-    if job.get("recruiter_email"):
-        return "RECRUITER_EMAIL"
+    source_text = normalize(source)
+    urls = extract_urls(snippet)
 
-    apply_url = job.get("apply_url") or ""
+    # ------------------------------------------------------
+    # Google Forms
+    # ------------------------------------------------------
 
-    if "linkedin.com" in apply_url.lower():
-        return "LINKEDIN_POST"
+    for url in urls:
 
-    if apply_url:
-        return "EXTERNAL_URL"
+        lower_url = url.lower()
 
-    return "UNKNOWN"
+        if (
+            "docs.google.com/forms" in lower_url
+            or "forms.gle" in lower_url
+        ):
+
+            return "GOOGLE_FORM", url
+
+    # ------------------------------------------------------
+    # Recruiter email
+    # ------------------------------------------------------
+
+    email = extract_recruiter_email(snippet)
+
+    if email:
+        return "RECRUITER_EMAIL", email
+
+    # ------------------------------------------------------
+    # LinkedIn
+    # ------------------------------------------------------
+
+    if "linkedin" in source_text:
+        return "LINKEDIN_POST", ""
+
+    # ------------------------------------------------------
+    # Common career platforms
+    # ------------------------------------------------------
+
+    career_sources = (
+        "greenhouse",
+        "lever.co",
+        "workday",
+        "myworkdayjobs",
+        "ashby",
+        "smartrecruiters",
+        "jobvite",
+        "icims",
+        "successfactors",
+        "oraclecloud",
+    )
+
+    if any(
+        platform in source_text
+        for platform in career_sources
+    ):
+
+        return "CAREER_PAGE", ""
+
+    # ------------------------------------------------------
+    # Career URLs visible in the job snippet
+    # ------------------------------------------------------
+
+    career_keywords = (
+        "/careers",
+        "/career",
+        "/jobs",
+        "/job/",
+        "careers.",
+        "jobs.",
+    )
+
+    for url in urls:
+
+        lower_url = url.lower()
+
+        if any(
+            keyword in lower_url
+            for keyword in career_keywords
+        ):
+
+            return "CAREER_PAGE", url
+
+    # ------------------------------------------------------
+    # Other external URLs
+    # ------------------------------------------------------
+
+    if urls:
+        return "EXTERNAL_APPLICATION", urls[0]
+
+    return "UNKNOWN", ""
+
+
+# ==========================================================
+# JOOBLE API REQUEST
+# ==========================================================
+
+def search_jooble(keywords, location):
+
+    if not JOOBLE_API_KEY:
+
+        raise ValueError(
+            "JOOBLE_API_KEY is missing from .env"
+        )
+
+    response = requests.post(
+        JOOBLE_API_URL,
+        json={
+            "keywords": keywords,
+            "location": location,
+            "page": 1,
+            "ResultOnPage": RESULTS_PER_REQUEST,
+            "companysearch": False,
+        },
+        timeout=REQUEST_TIMEOUT,
+    )
+
+    if response.status_code == 403:
+
+        raise RuntimeError(
+            "Jooble rejected the API key (HTTP 403)."
+        )
+
+    if not response.ok:
+
+        raise RuntimeError(
+            f"Jooble HTTP {response.status_code}: "
+            f"{response.text[:300]}"
+        )
+
+    data = response.json()
+
+    if not isinstance(data, dict):
+
+        raise RuntimeError(
+            "Unexpected Jooble response format."
+        )
+
+    return data
 
 
 # ==========================================================
 # SAVE / UPDATE JOB
 # ==========================================================
 
-def save_job(job, experience_label):
+def save_job(
+    job,
+    experience_label,
+    apply_method,
+    apply_url,
+    recruiter_email,
+):
     """
-    Insert a new job or update an existing job.
+    Insert a new job or refresh an existing one.
 
-    Returns:
-        True  -> new job inserted
-        False -> job already existed
+    Existing application_status values are preserved.
+    Returns True only when a new record is inserted.
     """
 
-    job_id = job.get("id", "")
-
-    application_url = get_application_url(job)
-
-    job_url = (
-        f"https://hopinjobs.com/jobs/{job_id}"
-        if job_id
-        else application_url
+    job_url = clean_text(
+        job.get("link")
     )
 
-    apply_method = get_apply_method(job)
+    if not job_url:
+        return False
+
+    updated = clean_text(
+        job.get("updated")
+    )
+
+    age = get_age_days(updated)
+
+    posted_days = (
+        int(age)
+        if age is not None
+        else None
+    )
 
     connection = get_connection()
     cursor = connection.cursor()
 
-    # Check whether the job already exists.
     cursor.execute(
         """
         SELECT id
@@ -364,12 +743,7 @@ def save_job(job, experience_label):
         (job_url,),
     )
 
-    existing = cursor.fetchone()
-
-    if existing:
-        was_existing = True
-    else:
-        was_existing = False
+    was_existing = cursor.fetchone() is not None
 
     cursor.execute(
         """
@@ -407,20 +781,20 @@ def save_job(job, experience_label):
             is_active = excluded.is_active
         """,
         (
-            job.get("company", "Unknown"),
-            job.get("title", "Unknown"),
-            job.get("location", "Unknown"),
-            job.get("work_type", "Unknown"),
+            clean_text(job.get("company")) or "Unknown",
+            clean_text(job.get("title")) or "Unknown",
+            clean_text(job.get("location")) or "Unknown",
+            clean_text(job.get("type")) or "Unknown",
             experience_label,
             job_url,
-            application_url,
-            job.get("description", ""),
-            "Hopin",
-            job.get("recruiter_email"),
+            apply_url,
+            clean_text(job.get("snippet")),
+            clean_text(job.get("source")) or "Jooble",
+            recruiter_email or None,
             apply_method,
-            job.get("posted_at"),
-            job.get("posted_days"),
-            1 if job.get("is_active", True) else 0,
+            updated or None,
+            posted_days,
+            1,
         ),
     )
 
@@ -437,244 +811,270 @@ def save_job(job, experience_label):
 def collect_jobs():
 
     print()
-    print("Fetching Hopin job feed...")
-    print("-" * 75)
+    print("=" * 75)
+    print("FETCHING FRESHER JOBS FROM JOOBLE")
+    print("=" * 75)
 
-    # ----------------------------------------------
-    # API request
-    # ----------------------------------------------
-
-    try:
-
-        response = requests.get(
-            API_URL,
-            params={
-                "is_unofficial": "true",
-            },
-            timeout=30,
-        )
-
-        response.raise_for_status()
-
-        data = response.json()
-
-    except requests.RequestException as error:
+    if not JOOBLE_API_KEY:
 
         print()
-        print("ERROR: Could not connect to Hopin.")
-        print(error)
+        print("ERROR: JOOBLE_API_KEY is missing from .env")
 
-        # Always return 3 values so main.py
-        # can handle an API failure safely.
         return 0, 0, 0
 
-    # ----------------------------------------------
-    # Get jobs
-    # ----------------------------------------------
+    locations = get_api_locations()
 
-    jobs = data.get("jobs", [])
+    if not locations:
 
-    print(
-        f"Jobs received: {len(jobs)}"
-    )
+        print("ERROR: No locations configured.")
+        return 0, 0, 0
 
-    print()
+    all_jobs = {}
+    request_count = 0
+
+    # Filter counters help explain why jobs are rejected.
+    rejected_role = 0
+    rejected_location = 0
+    rejected_freshness = 0
+    rejected_experience = 0
+    rejected_missing_url = 0
+
+    # ------------------------------------------------------
+    # Search Jooble
+    # ------------------------------------------------------
+
+    for location in locations:
+
+        for keywords in SEARCH_GROUPS:
+
+            if request_count >= MAX_API_REQUESTS_PER_RUN:
+                break
+
+            request_count += 1
+
+            print()
+            print(
+                f"Jooble request {request_count}/"
+                f"{MAX_API_REQUESTS_PER_RUN}"
+            )
+
+            print(f"Location : {location}")
+            print(f"Keywords : {keywords}")
+
+            try:
+
+                data = search_jooble(
+                    keywords=keywords,
+                    location=location,
+                )
+
+            except Exception as error:
+
+                print()
+                print("Jooble request failed:")
+                print(error)
+
+                continue
+
+            jobs = data.get("jobs", [])
+
+            print(
+                f"Total matching jobs: "
+                f"{data.get('totalCount', 0)}"
+            )
+
+            print(
+                f"Jobs returned: {len(jobs)}"
+            )
+
+            for job in jobs:
+
+                key = (
+                    clean_text(job.get("id"))
+                    or clean_text(job.get("link"))
+                )
+
+                if key:
+                    all_jobs[key] = job
+
+    jobs_received = len(all_jobs)
 
     matched_jobs = 0
     new_jobs = 0
 
-    # ----------------------------------------------
-    # Process every job
-    # ----------------------------------------------
+    print()
+    print(
+        f"Unique jobs received: {jobs_received}"
+    )
 
-    for job in jobs:
+    # ------------------------------------------------------
+    # Filter and save unique jobs
+    # ------------------------------------------------------
 
-        title = job.get("title", "")
-        location = job.get("location", "")
+    for job in all_jobs.values():
 
-        # ------------------------------------------
-        # Active job
-        # ------------------------------------------
+        title = clean_text(job.get("title"))
+        location = clean_text(job.get("location"))
+        snippet = clean_text(job.get("snippet"))
+        source = clean_text(job.get("source"))
+        updated = clean_text(job.get("updated"))
 
-        if not job.get(
-            "is_active",
-            True,
-        ):
-            continue
-
-        # ------------------------------------------
+        # ----------------------------------------------
         # Role filter
-        # ------------------------------------------
+        # ----------------------------------------------
 
         if not role_matches(title):
+
+            rejected_role += 1
             continue
 
-        # ------------------------------------------
+        # ----------------------------------------------
         # Location filter
-        # ------------------------------------------
+        # ----------------------------------------------
 
         if not location_matches(location):
+
+            rejected_location += 1
             continue
 
-        # ------------------------------------------
+        # ----------------------------------------------
         # Freshness filter
-        # ------------------------------------------
+        # ----------------------------------------------
 
-        posted_days = job.get(
-            "posted_days"
-        )
+        if not is_fresh(updated):
 
-        if posted_days is not None:
+            rejected_freshness += 1
+            continue
 
-            try:
-
-                posted_days_value = int(
-                    posted_days
-                )
-
-                if (
-                    posted_days_value
-                    > MAX_JOB_AGE_DAYS
-                ):
-                    continue
-
-            except (
-                TypeError,
-                ValueError,
-            ):
-                pass
-
-        # ------------------------------------------
+        # ----------------------------------------------
         # Experience filter
-        # ------------------------------------------
+        # ----------------------------------------------
 
         suitable, experience_label = (
             get_experience_info(job)
         )
 
         if not suitable:
+
+            rejected_experience += 1
             continue
 
-        # ------------------------------------------
-        # Scam filter
-        # ------------------------------------------
+        # ----------------------------------------------
+        # Application route
+        # ----------------------------------------------
 
-        scam_verdict = normalize(
-            job.get(
-                "scam_verdict",
-                "",
+        apply_method, destination = (
+            classify_application(
+                snippet,
+                source,
             )
         )
 
-        if (
-            scam_verdict
-            and scam_verdict != "clean"
-        ):
+        recruiter_email = ""
+        apply_url = ""
+
+        # Auto-email applications are enabled by the
+        # collector only for explicitly fresher-friendly
+        # jobs. Experience-unknown email jobs are retained
+        # for manual review instead.
+        if apply_method == "RECRUITER_EMAIL":
+
+            if experience_label == "Fresher / 0-1 year":
+
+                recruiter_email = destination
+
+            else:
+
+                apply_method = "MANUAL_REVIEW"
+
+        elif destination:
+
+            apply_url = destination
+
+        # --------------------------------------------------
+        # IMPORTANT: preserve a review link
+        # --------------------------------------------------
+
+        # Jooble's API often does not expose an employer
+        # application URL. When no direct URL is available,
+        # preserve the Jooble listing for manual review.
+        if not apply_url:
+
+            apply_url = clean_text(
+                job.get("link")
+            )
+
+        # Unknown destinations are still reviewable.
+        if apply_method == "UNKNOWN":
+
+            apply_method = "MANUAL_REVIEW"
+
+        if not apply_url:
+
+            rejected_missing_url += 1
             continue
 
-        # ------------------------------------------
-        # Matching job
-        # ------------------------------------------
+        # ----------------------------------------------
+        # Save job
+        # ----------------------------------------------
 
         matched_jobs += 1
 
         inserted = save_job(
-            job,
-            experience_label,
+            job=job,
+            experience_label=experience_label,
+            apply_method=apply_method,
+            apply_url=apply_url,
+            recruiter_email=recruiter_email,
         )
 
         if inserted:
             new_jobs += 1
 
-        # ------------------------------------------
+        # ----------------------------------------------
         # Display
-        # ------------------------------------------
+        # ----------------------------------------------
 
-        print("=" * 75)
+        print()
+        print("-" * 75)
 
-        print(
-            f"Company        : "
-            f"{job.get('company', 'Unknown')}"
-        )
+        print(f"Company        : {job.get('company', 'Unknown')}")
+        print(f"Role           : {title}")
+        print(f"Location       : {location}")
+        print(f"Experience     : {experience_label}")
+        print(f"Source         : {source or 'Jooble'}")
+        print(f"Updated        : {updated or 'Unknown'}")
+        print(f"Recruiter mail : {recruiter_email or 'None'}")
+        print(f"Apply method   : {apply_method}")
+        print(f"Apply URL      : {apply_url}")
+        print(f"Jooble link    : {job.get('link', 'None')}")
 
-        print(
-            f"Role           : "
-            f"{title}"
-        )
-
-        print(
-            f"Location       : "
-            f"{location}"
-        )
-
-        print(
-            f"Work type      : "
-            f"{job.get('work_type', 'Unknown')}"
-        )
-
-        print(
-            f"Role type      : "
-            f"{job.get('role_type', 'Unknown')}"
-        )
-
-        print(
-            f"Experience     : "
-            f"{experience_label}"
-        )
-
-        print(
-            f"Posted         : "
-            f"{job.get('posted_at', 'Unknown')}"
-        )
-
-        print(
-            f"Posted days    : "
-            f"{job.get('posted_days', 'Unknown')}"
-        )
-
-        print(
-            f"Scam verdict   : "
-            f"{job.get('scam_verdict', 'Unknown')}"
-        )
-
-        print(
-            f"Recruiter mail : "
-            f"{job.get('recruiter_email', 'None')}"
-        )
-
-        print(
-            f"Apply method   : "
-            f"{get_apply_method(job)}"
-        )
-
-        print(
-            f"Apply URL      : "
-            f"{get_application_url(job) or 'None'}"
-        )
-
-        print("=" * 75)
-
-    # ----------------------------------------------
-    # Summary
-    # ----------------------------------------------
+    # ------------------------------------------------------
+    # Collection summary
+    # ------------------------------------------------------
 
     print()
-    print("COLLECTION COMPLETED")
+    print("=" * 75)
+    print("JOOBLE COLLECTION COMPLETED")
     print("-" * 75)
 
-    print(
-        f"Matching jobs : {matched_jobs}"
-    )
+    print(f"API requests made       : {request_count}")
+    print(f"Unique jobs received    : {jobs_received}")
+    print(f"Matching jobs           : {matched_jobs}")
+    print(f"New jobs saved          : {new_jobs}")
 
-    print(
-        f"New jobs saved: {new_jobs}"
-    )
+    print()
+    print("FILTER SUMMARY")
+    print(f"Rejected by role        : {rejected_role}")
+    print(f"Rejected by location    : {rejected_location}")
+    print(f"Rejected by freshness   : {rejected_freshness}")
+    print(f"Rejected by experience  : {rejected_experience}")
+    print(f"Missing review URL      : {rejected_missing_url}")
 
-    # IMPORTANT:
-    # main.py uses these values for the
-    # daily summary email.
+    print("=" * 75)
+
     return (
-        len(jobs),
+        jobs_received,
         matched_jobs,
         new_jobs,
     )
@@ -685,4 +1085,5 @@ def collect_jobs():
 # ==========================================================
 
 if __name__ == "__main__":
+
     collect_jobs()
